@@ -67,7 +67,7 @@ func main() {
 		compression.NewZLibCompressor(),
 	)
 
-	b := commit.GetVotes()[5].VoteExtension
+	b := commit.GetVotes()[4].VoteExtension
 	ve, err := veCodec.Decode(b)
 	if err != nil {
 		panic(err)
@@ -82,11 +82,10 @@ func main() {
 		fmt.Println(k, ":", y)
 	}
 
-	id, err := currencypair.CurrencyPairToHashID("USD/XRP")
+	id, err := currencypair.CurrencyPairToHashID("XRP/USD")
 	if err != nil {
 		panic(err)
 	}
-
 	fmt.Println(id)
 }
 
