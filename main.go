@@ -16,6 +16,7 @@ import (
 )
 
 func main() {
+	// grpc
 	ctx := context.Background()
 	conn, err := grpc.DialContext(
 		ctx,
@@ -30,11 +31,20 @@ func main() {
 	cmtClient := types.NewServiceClient(conn)
 	oracleClient := oracletypes.NewQueryClient(conn)
 
+	// pair mapping
+	id2cp := make(map[uint64]string)
+
 	cpresp, err := oracleClient.GetAllCurrencyPairs(
 		ctx,
 		&oracletypes.GetAllCurrencyPairsRequest{},
 	)
-	cpresp.CurrencyPairs[0].String()
+	for _, cp := range cpresp.CurrencyPairs {
+		id, err := currencypair.CurrencyPairToHashID(cp.String())
+		if err != nil {
+			panic(err)
+		}
+		id2cp[id] = cp.String()
+	}
 
 	resp, err := cmtClient.GetLatestBlock(
 		ctx,
@@ -50,6 +60,18 @@ func main() {
 		compression.NewDefaultExtendedCommitCodec(),
 		compression.NewZStdCompressor(),
 	)
+	veCodec := compression.NewCompressionVoteExtensionCodec(
+		compression.NewDefaultVoteExtensionCodec(),
+		compression.NewZLibCompressor(),
+	)
+
+	type Info struct {
+		blockIdFlag string
+		veBytesLen  int
+		prices      map[string]*big.Int
+	}
+	result := make(map[string]*Info)
+
 	commit, err := commitCodec.Decode(txs[0])
 	if err != nil {
 		panic(err)
@@ -59,34 +81,38 @@ func main() {
 		addr := vote.Validator.Address
 		cons := sdktypes.MustBech32ifyAddressBytes("initvalcons", addr)
 		// acc := sdkTypes.MustBech32ifyAddressBytes("init", addr)
-		fmt.Println(cons, ":", vote.BlockIdFlag, ":", len(vote.VoteExtension))
-	}
 
-	veCodec := compression.NewCompressionVoteExtensionCodec(
-		compression.NewDefaultVoteExtensionCodec(),
-		compression.NewZLibCompressor(),
-	)
+		info := &Info{
+			blockIdFlag: vote.BlockIdFlag.String(),
+			veBytesLen:  len(vote.VoteExtension),
+			prices:      make(map[string]*big.Int),
+		}
 
-	b := commit.GetVotes()[4].VoteExtension
-	ve, err := veCodec.Decode(b)
-	if err != nil {
-		panic(err)
-	}
-
-	for k, v := range ve.Prices {
-		y, err := GetDecodedPrice(v)
+		ve, err := veCodec.Decode(vote.VoteExtension)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Println(k, ":", y)
+		for k, priceBytes := range ve.Prices {
+			price, err := GetDecodedPrice(priceBytes)
+			if err != nil {
+				panic(err)
+			}
+			info.prices[id2cp[k]] = price
+		}
+
+		result[cons] = info
 	}
 
-	id, err := currencypair.CurrencyPairToHashID("XRP/USD")
-	if err != nil {
-		panic(err)
+	for cons, info := range result {
+		fmt.Println("========================================")
+		fmt.Println(cons)
+		fmt.Println(info.blockIdFlag, ":", info.veBytesLen)
+		for cp, price := range info.prices {
+			fmt.Println(cp, price)
+		}
+		fmt.Println("========================================")
 	}
-	fmt.Println(id)
 }
 
 func GetDecodedPrice(priceBytes []byte) (*big.Int, error) {
